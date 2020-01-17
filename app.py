@@ -27,7 +27,7 @@ async def client_session(app):
 async def avatar(request):
     # process the input
     try:
-        email = app['fernet'].decrypt(bytes(request.match_info['email'], 'ascii'))
+        email = request.app['fernet'].decrypt(bytes(request.match_info['email'], 'utf8'))
     except InvalidToken:
         raise web.HTTPNotFound
 
@@ -43,7 +43,7 @@ async def avatar(request):
     url = GRAVATAR_URL.format(email_encoded, parameters)
 
     # fetch the avatar, and send it off
-    async with app['client_session'].get(url) as resp:
+    async with request.app['client_session'].get(url) as resp:
         if resp.status == 404:
             # todo: placeholder
             raise web.HTTPNotFound
