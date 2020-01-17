@@ -1,0 +1,4 @@
+sanic
+python-dotenv
+cryptography
+requests
