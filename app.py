@@ -1,42 +1,37 @@
-import os
+import argparse
 from hashlib import md5
 from urllib.parse import urlencode
 
 import aiohttp
+from aiohttp import web
+from aiohttp.web_response import Response
 from cryptography.fernet import Fernet, InvalidToken
-from dotenv import load_dotenv
-from sanic import Sanic
-from sanic.exceptions import abort
-from sanic.response import raw
 
-load_dotenv()
+parser = argparse.ArgumentParser()
+parser.add_argument('--key')
+parser.add_argument('--path')
+parser.add_argument('--port')
 
 GRAVATAR_URL = "https://www.gravatar.com/avatar/{}?{}"
 
-app = Sanic(__name__)
-f = Fernet(bytes(os.getenv("KEY"), 'ascii'))
+routes = web.RouteTableDef()
 
 
-@app.listener('before_server_start')
-def init(app, loop):
-    app.aiohttp_session = aiohttp.ClientSession(loop=loop)
+async def client_session(app):
+    app['client_session'] = aiohttp.ClientSession()
+    yield
+    await app['client_session'].close()
 
 
-@app.listener('after_server_stop')
-def finish(app, loop):
-    loop.run_until_complete(app.aiohttp_session.close())
-    loop.close()
-
-
-@app.route('/avatar/<email>')
-async def avatar(request, email):
+@routes.get('/avatar/{email}')
+async def avatar(request):
     # process the input
     try:
-        email = f.decrypt(bytes(email, 'ascii'))
+        email = app['fernet'].decrypt(bytes(request.match_info['email'], 'ascii'))
     except InvalidToken:
-        abort(404)
+        raise web.HTTPNotFound
 
-    size = request.args.get('s', default='64')
+    size = request.query.get('s', default='64')
 
     # get the URL we are going to need for Gravatar
     email_encoded = md5(email.lower()).hexdigest()  # nosec
@@ -48,13 +43,23 @@ async def avatar(request, email):
     url = GRAVATAR_URL.format(email_encoded, parameters)
 
     # fetch the avatar, and send it off
-    async with app.aiohttp_session.get(url) as resp:
+    async with app['client_session'].get(url) as resp:
         if resp.status == 404:
-            abort(404)
+            # todo: placeholder
+            raise web.HTTPNotFound
 
         data = await resp.read()
-        return raw(data, content_type=resp.content_type)
+
+    return Response(body=data, content_type=resp.content_type)
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8000)
+    app = web.Application()
+    args = parser.parse_args()
+
+    app.cleanup_ctx.append(client_session)
+
+    app['fernet'] = Fernet(bytes(args.key, 'ascii'))
+
+    app.add_routes(routes)
+    web.run_app(app, path=args.path, port=args.port)

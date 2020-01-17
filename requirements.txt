@@ -1,4 +1,2 @@
-sanic
-python-dotenv
 cryptography
-requests
+aiohttp
