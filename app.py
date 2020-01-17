@@ -53,13 +53,18 @@ async def avatar(request):
     return Response(body=data, content_type=resp.content_type)
 
 
-if __name__ == '__main__':
+def get_app():
     app = web.Application()
-    args = parser.parse_args()
-
+    app['args'] = parser.parse_args()
+    app['fernet'] = Fernet(bytes(app['args'].key, 'ascii'))
     app.cleanup_ctx.append(client_session)
-
-    app['fernet'] = Fernet(bytes(args.key, 'ascii'))
-
     app.add_routes(routes)
-    web.run_app(app, path=args.path, port=args.port)
+    return app
+
+
+async def get_app_async():
+    return get_app()
+
+if __name__ == '__main__':
+    application = get_app()
+    web.run_app(application, path=application['args'].path, port=application['args'].port)
