@@ -1,18 +1,18 @@
 import argparse
-from hashlib import md5
-from urllib.parse import urlencode
+import json
 
 import aiohttp
 from aiohttp import web
 from aiohttp.web_response import Response
 from cryptography.fernet import Fernet, InvalidToken
 
+from logic import get_url
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--key')
 parser.add_argument('--path')
 parser.add_argument('--port')
 
-GRAVATAR_URL = "https://www.gravatar.com/avatar/{}?{}"
 
 routes = web.RouteTableDef()
 
@@ -23,30 +23,30 @@ async def client_session(app):
     await app['client_session'].close()
 
 
-@routes.get('/avatar/{email}')
+@routes.get('/avatar/{token}')
 async def avatar(request):
     # process the input
     try:
-        email = request.app['fernet'].decrypt(bytes(request.match_info['email'], 'utf8'))
+        token = bytes(request.match_info['token'], 'utf8')
+        data = request.app['fernet'].decrypt(token)
     except InvalidToken:
         raise web.HTTPNotFound
 
-    size = request.query.get('s', default='64')
+    data = json.loads(data)
 
-    # get the URL we are going to need for Gravatar
-    email_encoded = md5(email.lower()).hexdigest()  # nosec
-    parameters = urlencode({
-        's': str(size),
-        'd': '404'
-    })
+    email = data['email']
+    size = data.get('size', 128)
+    fallback = data.get('fallback', None)
 
-    url = GRAVATAR_URL.format(email_encoded, parameters)
+    url = await get_url(email, size)
 
     # fetch the avatar, and send it off
     async with request.app['client_session'].get(url) as resp:
         if resp.status == 404:
-            # todo: placeholder
-            raise web.HTTPNotFound
+            if fallback:
+                raise web.HTTPFound(fallback)
+            else:
+                raise web.HTTPNotFound
 
         data = await resp.read()
 
